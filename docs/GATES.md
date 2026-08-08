@@ -1,7 +1,7 @@
 # Product gates (netherite)
 
 **netherite** is the product name: a from-scratch C/CUDA reimplementation of
-Minecraft 1.11.2 (magma + mc-sim), bit-verified against the real Java game,
+Minecraft 1.11.2 (magma + blaze), bit-verified against the real Java game,
 plus a batched CUDA RL env (blaze). Humans play the oracle; tapes record; magma
 replays; every divergence is a bug with a repro.
 
@@ -14,11 +14,11 @@ Accept: a human plays magma spawn -> End with zero divergences; canonical tapes 
 bit-exact (physics tol 1e-9, pixels day-bit-exact / isolated star pixels at night, no
 unexplained diff clusters).
 Status: OPEN, machinery green. The physics canonical tape
-(`c/magma/raster/verify/tapes/20260721T215812Z_..._77b5b462.jsonl`, 3,617 ticks, bot-recorded)
+(`verify/tapes/20260721T215812Z_..._77b5b462.jsonl`, 3,617 ticks, bot-recorded)
 replays with no physics divergence end-to-end; the 12k human tape holds the pixel
 baselines (A 0.96/ch, B 1.66/ch). Remaining bugs live in
-`c/magma/OPEN_DIVERGENCES.md`; the full spawn->End human session has not yet been
-played clean. Verification procedure: `c/magma/VERIFY.md`.
+`magma/OPEN_DIVERGENCES.md`; the full spawn->End human session has not yet been
+played clean. Verification procedure: `magma/VERIFY.md`.
 
 ### Gate 2 - RL
 Accept: spawn -> torches learned with ZERO scripted stages in the batched CUDA env
@@ -29,8 +29,8 @@ frontier curriculum from the policy's OWN captured states via blaze_capture). Re
 cold-spawn transfer, sampled best-of-5: full chain on 11/13 seeds INCLUDING both
 held-out seeds (11, 33); the 2 misses (2, 16) reach cobble with a self-crafted pick and
 fail at finding coal. ~1.92B env-ticks / ~7.9 h active train. Net: rl/out/chain_net_cu.pt
-(untracked). JVM demo SHIPPED (2026-07-15): a bit-matching Java SemanticCamera in the
-qrl mod (obs_camera.h geometry) + float look / craft:N / interact bridge extensions let
+(untracked). JVM demo SHIPPED (2026-07-15): a bit-matching Java SemanticCamera in
+NetheriteMod (mod id qrl; obs_camera.h geometry) + float look / craft:N / interact bridge extensions let
 the same net drive the real JVM game scriptlessly to cobble3 (log -> planks -> sticks
 -> table -> wooden pick -> 45 cobble at y=22); best-of-6 sampled, video delivered.
 Transfer is attenuated vs magma (biome/tree ids outside the trained cam vocabulary;
@@ -100,18 +100,127 @@ needs a ~1.6x raster kernel (bit-parity-constrained) plus hud caching and
 io/present overlap. The 3090's 11.74 (07-17, host-rendered sky) was not
 re-measured - it has a co-tenant. CPU backend is not on the 60 fps path.
 
+2026-08-07 full-parity 70% checkpoint: the clean regression guard remains
+above all frozen floors at 5,094 CPU scalar steps/s, 2.87M Blaze environment
+ticks/s, and 31.05 CUDA fps. This confirms no checkpoint regression; it does
+not close the separate 60 fps ship pin. Evidence:
+`c/magma/trace/out/perf_guard_70pct_checkpoint.json`.
+
+2026-08-07 strict-equivalence checkpoint: the full native runtime aggregate
+passes in 6:45.71 with 431,540 KiB peak RSS and zero swap. The fresh CPU guard
+passes at 4,204 scalar steps/s against the frozen 3,858.9 floor. GPU 1 had a
+co-tenant, so no new GPU number was taken for this checkpoint.
+
+2026-08-07 firework-audio checkpoint: the exact-current full native runtime
+aggregate passes in 6:40.65 with 448,124 KiB peak RSS, zero major faults, and
+zero swap. The CPU guard passes at 4,132 scalar steps/s against the frozen
+3,858.9 floor. The direct real-Java/native audio comparator passes eight
+boundary cases and its delay negative control. Every locally available quick
+sweep stage passes; the two snapshot-backed Blaze stages skip because their
+`.bsnp` inputs are absent. GPU 1 was not executed.
+
+2026-08-07 block-break-audio checkpoint: the exact-current full native runtime
+aggregate passes in 6:44.47 with 446,676 KiB peak RSS, zero major faults, and
+zero swap. The CPU guard passes at 4,085 scalar steps/s against the frozen
+3,858.9 floor. The exhaustive real-Java/native comparator matches all 235
+registered non-air block IDs, twelve material families, every valid metadata
+state, and raw volume/pitch bits, while rejecting its material negative
+control. Every locally available quick-sweep stage passes; the same two
+snapshot-backed Blaze stages skip because their `.bsnp` inputs are absent.
+GPU 1 was not executed.
+
+2026-08-07 block-placement-audio checkpoint: the exact-current full native
+runtime aggregate passes in 6:39.86 with 437,400 KiB peak RSS and zero major
+faults. The CPU guard passes at 4,142 scalar steps/s against the frozen
+3,858.9 floor. The exhaustive real-Java/native comparator matches all 235
+registered non-air block IDs, twelve break and twelve placement families,
+every valid metadata state, and raw volume/pitch bits, while rejecting
+independent material negative controls. The clean product, JDK 8, OpenAL, and
+focused seven-family parity gates pass. Every locally available quick-sweep
+step passes; the two snapshot stages skip because their `.bsnp` inputs are
+absent. GPU 1 was not executed.
+
+2026-08-07 block-hit-audio checkpoint: the exact-current full native runtime
+aggregate passes in 6:22.74 with 448,576 KiB peak RSS, zero major faults, and
+zero swap. The CPU guard passes at 4,197 scalar steps/s against the frozen
+3,858.9 floor. The exhaustive real-Java/native comparator matches all 235
+registered non-air block IDs, twelve break, placement, and progressive-hit
+families, every valid metadata state, and raw volume/pitch bits, while
+rejecting independent per-action material negative controls. The controller
+gate pins damage-update cadence at zero and every fourth update; clean native,
+JDK 8, OpenAL, and focused parity gates pass. Every locally available quick
+sweep step passes; the two snapshot stages skip because their `.bsnp` inputs
+are absent. GPU 1 was not executed.
+
+2026-08-08 player-landing-audio checkpoint: the exact-current full native
+runtime aggregate passes in 6:30.95 with 449,568 KiB peak RSS, zero major
+faults, and zero swap. The CPU guard passes at 4,353 scalar steps/s against the
+frozen 3,858.9 floor. The exhaustive real-Java/native comparator matches all
+235 registered non-air block IDs, twelve fall families, every valid metadata
+state, and raw volume/pitch bits. Focused tests pin small/big selection, hay's
+0.2 damage multiplier, and ordered player/material events. Every locally
+available quick-sweep stage passes; the two snapshot-backed Blaze stages skip
+because their `.bsnp` inputs are absent. GPU 1 was not executed.
+
+2026-08-08 player-water-entry-particle checkpoint: the exact-current full
+native aggregate passes in 6:29.09 with 450,556 KiB peak RSS, zero major
+faults, and zero swap. The CPU guard passes at 4,088 scalar steps/s against the
+frozen 3,858.9 floor and above the 4,062 baseline. The real-Java/native
+comparator matches all 26 ordered particle call argument bit patterns and the
+final Entity.rand cursor. Focused runtime and live-particle tests pin current-
+tick clearing, vanilla identities/texture cells, spawn-frame timing, lighting,
+motion, gravity, and billboards. Clean Java/native builds and every locally
+available quick-sweep stage pass; the two snapshot-backed Blaze stages skip
+because their `.bsnp` inputs are absent. GPU 1 was not executed. Java's
+wall-clock-seeded particle-constructor entropy remains outside this exact gate.
+
+2026-08-08 player-footstep-audio checkpoint: the exact-current full native
+runtime aggregate passes in 6:24.97 with 450,656 KiB peak RSS, zero major
+faults, and zero swap. The CPU guard passes at 4,055 scalar steps/s against the
+frozen 3,858.9 floor and is within 0.2% of the 4,062 baseline. The exhaustive
+real-Java/native comparator matches all 235 registered non-air block IDs,
+twelve step families, every valid metadata state, and raw volume/pitch bits.
+Focused tests pin tick-10 cadence, snow override, sneak/riding suppression,
+and live event position/category/scalars. Every locally available quick-sweep
+stage passes; the two snapshot-backed Blaze stages skip because their `.bsnp`
+inputs are absent. GPU 1 was not executed.
+
+2026-08-08 player-swim/splash-audio checkpoint: the exact-current full native
+runtime aggregate passes in 6:06.00 with 450,080 KiB peak RSS, zero major
+faults, and zero swap. The CPU guard passes at 4,312 scalar steps/s against the
+frozen 3,858.9 floor and exceeds the 4,062 baseline. The real-Java/native
+comparator matches raw swim/splash volume and pitch bits, the volume cap,
+splash's 67 total RNG draws, and the chained next-swim pitch. Focused runtime
+tests pin first-entry detection, ordered pre-move splash/post-move swim sources,
+category, scalars, and the final client Entity.rand cursor. Every locally
+available quick-sweep stage passes; the two snapshot-backed Blaze stages skip
+because their `.bsnp` inputs are absent. GPU 1 was not executed.
+
+2026-08-08 player attack/sweep checkpoint: the exact-current full native
+runtime aggregate passes in 5:45.65 with 450,268 KiB peak RSS, zero major
+faults, and zero swap. The CPU guard passes at 4,482 scalar steps/s against the
+frozen 3,858.9 floor. The locked real-Java fixture passes 60 cases covering
+the attack predicate, damage/motion/fire state, all six player attack sounds,
+movement-gated sweep selection, and Sweeping Edge I/III raw-float outcomes.
+Focused native tests cover live sound order, shifted world origins, secondary
+damage, and rejected attacks. OpenAL validates 146 events and 469 owned
+variants. Every locally available quick-sweep stage passes; the two
+snapshot-backed Blaze stages skip because their `.bsnp` inputs are absent.
+GPU 1 was not executed.
+
 ### Gate 4 - ops (this deliverable)
 Accept: one command runs the verification pyramid green.
-Status: SHIPPED as `netherite_sweep.sh` (repo root). `--quick` is green today except
-steps listed as SKIP (known-broken `make test-config` at HEAD; artifact-gated steps).
-A FAIL exits nonzero; SKIPs never do.
+Status: SHIPPED as `netherite_sweep.sh` (repo root). At the 2026-08-07 70%
+checkpoint, `--quick` passes 15/15 with no skips. `--full` passes all 26
+available steps with zero failures and skips only the undistributed local
+canonical tape. A FAIL exits nonzero; SKIPs never do.
 
 ## Running the sweep
 
 ```bash
 bash netherite_sweep.sh --quick          # builds + unit batteries + blaze CPU gate + vec-env (<10 min)
-bash netherite_sweep.sh --full           # + mc-sim CUDA oracle, blaze CUDA gate, canonical tape replay (GPU1), raster parity, RL smoke (<40 min)
-bash netherite_sweep.sh --full --gpu 0   # device for blaze/mc-sim CUDA steps (tape replay + parity stay pinned to GPU1)
+bash netherite_sweep.sh --full           # + blaze core CUDA oracle, blaze env CUDA gate, canonical tape replay (GPU1), raster parity, RL smoke (<40 min)
+bash netherite_sweep.sh --full --gpu 0   # device for blaze CUDA steps (tape replay + parity stay pinned to GPU1)
 ```
 
 Each step wraps an existing gate (make target or script - nothing reimplemented), has
@@ -119,8 +228,39 @@ its own timeout and log (path printed at start), and reports [PASS]/[FAIL]/[SKIP
 a summary table. GPU steps preflight `nvidia-smi` and SKIP when the device is >50%
 util - the box is shared. Missing artifacts (snapshots, tapes, prefixes) SKIP with a
 reason. Deeper/slower layers of the pyramid stay where they live: the nightly all-tape
-sweep is `c/magma/raster/verify/nightly_verify.sh`, per-kernel CPU==CUDA verifies are
-`make -C c/mc-sim verify-<kernel>`.
+sweep is `verify/nightly_verify.sh`, per-kernel CPU==CUDA verifies are
+`make -C blaze verify-<kernel>`.
+
+## Pinned engineering gates (standalone)
+
+These are not the four ship gates above; they are locked harnesses that reject
+unintentional drift. Run them after touching the corresponding surfaces.
+
+| Gate | Invoke | What it pins |
+|------|--------|--------------|
+| Kernel pair parity | `bash scripts/kernel_parity_gate.sh` | CUDA/Metal kernel hashes + cpu==gpu frames |
+| Wrapper worldgen census | `bash verify/worldgen/wrapper_gate.sh` | magma product populate wrapper vs blaze `owr` reference under fluid=OFF + shroomlight=stale (seeds 0 7 9 19, origin 2x2) |
+
+### Wrapper worldgen census
+
+Sidecar: `verify/worldgen/known_divergences.json`. Per seed: `diff_cells`,
+class breakdown (`fluid` / `mushroom` / `other`), and `diff_sha256` (sha256 of
+sorted `x,y,z,blaze_state,magma_state` lines). Counts alone are not enough:
+opposite-sign cell changes can cancel.
+
+Blessed 2026-08-02 as KNOWN wrapper mechanics (not bugs): ore-family multi-window
+apply (stone -> granite/diorite/andesite) and load-order raster-vs-reverse delta.
+Any drift from the sidecar FAILS (rc=1) with a per-seed count/class/hash report.
+`--update` rewrites the sidecar; that is maintainer judgment only.
+
+Diagnostic (not the gate): `bash verify/worldgen/wrapper_diff.sh`.
+
+OPEN policy note (not pinned): `MAGMA_FLUID_CA=1` changes 279/10936/4885 cells at
+seeds 0/7/9; no gate pins magma default-off vs blaze always-on.
+
+Not wired into `scripts/delegate_gate.sh` / `scripts/regression_pins.txt` (those
+files are frozen). Invoke the wrapper gate standalone after populate/wrapper or
+owr-path changes.
 
 ## Out of scope
 
